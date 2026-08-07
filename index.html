@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Presupuestos · Plomería Jujuy</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+        .ff-display { font-family: 'Oswald', sans-serif; }
+        .ff-body { font-family: 'IBM Plex Sans', sans-serif; }
+        .ff-mono { font-family: 'IBM Plex Mono', monospace; }
+        .text-2xs { font-size: 10.5px; line-height: 1.3; }
+
+        .paper-bg {
+            background-color: #F2F4F3;
+            background-image:
+                linear-gradient(rgba(59,127,176,0.06) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59,127,176,0.06) 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+
+        .rotulo { background: #0F2A38; color: #EAF4F6; }
+        .rotulo-cell { border: 1px solid rgba(234,244,246,0.25); }
+        .rotulo-label { color: #D98A4E; }
+
+        .dim-divider { display: flex; align-items: center; gap: 6px; margin: 26px 0 14px; }
+        .dim-tick { width: 1px; height: 14px; background: #A9B8B8; flex-shrink: 0; }
+        .dim-line { flex: 1; height: 1px; background: #A9B8B8; }
+        .dim-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #5C6B6B;
+            white-space: nowrap;
+        }
+
+        .tab-btn {
+            font-family: 'Oswald', sans-serif;
+            letter-spacing: 0.04em;
+            color: rgba(234,244,246,0.55);
+            border-bottom: 3px solid transparent;
+            padding-bottom: 4px;
+            background: none;
+            border-top: none;
+            border-left: none;
+            border-right: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .tab-btn[data-active="true"] { color: #EAF4F6; border-bottom-color: #B5652D; }
+
+        @media print {
+            body * { visibility: hidden; }
+            #quote-preview, #quote-preview * { visibility: visible; }
+            #quote-preview { position: absolute; left: 0; top: 0; width: 100%; background: white; padding: 20px; }
+            .no-print { display: none !important; }
+        }
+
+        input, textarea {
+            font-family: 'IBM Plex Sans', sans-serif;
+        }
+        input[type="number"] {
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        input:focus, textarea:focus {
+            outline: 2px solid #B5652D;
+            outline-offset: 1px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<script>
+    // ====== STORAGE WRAPPER ======
+    const storage = {
+        get: (key) => {
+            try {
+                const raw = localStorage.getItem(key);
+                return raw ? JSON.parse(raw) : null;
+            } catch { return null; }
+        },
+        set: (key, value) => {
+            try {
+                localStorage.setItem(key, JSON.stringify(value));
+                return true;
+            } catch { return false; }
+        },
+        delete: (key) => {
+            try {
+                localStorage.removeItem(key);
+                return true;
+            } catch { return false; }
+        }
+    };
+
+    // ====== CONSTANTES ======
+    const PERFIL_KEY = "perfil";
+    const PRECIOS_KEY = "precios-lista";
+    const INDEX_KEY = "presupuestos-index";
+
+    const CATEGORIES = [
+        { id: "agua_fria", label: "Agua fría", color: "#3B7FB0", icon: "droplet",
+            normativa: "Materiales certificados con la norma IRAM del material utilizado (PVC, PPR, cobre — IRAM 2609 para cobre). Los sistemas de sobrepresión/bombeo deben ajustarse a IRAM 2634." },
+        { id: "agua_caliente", label: "Agua caliente", color: "#C1502E", icon: "droplet",
+            normativa: "Mismo criterio que agua fría, sumando aislación térmica en tramos expuestos y válvula de seguridad certificada en termotanques." },
+        { id: "cloacal", label: "Desagüe cloacal", color: "#8A7245", icon: "wrench",
+            normativa: "Pendientes, diámetros y conexión a colectora sujetos al reglamento de instalaciones internas de Agua Potable y Saneamiento de Jujuy S.E. (APSJ), en el marco del Código de Aguas provincial (Ley 161)." },
+        { id: "pluvial", label: "Desagüe pluvial", color: "#4C8A5E", icon: "wrench",
+            normativa: "No debe interconectarse con la red cloacal. El destino final del desagüe pluvial se confirma con APSJ o el municipio." },
+        { id: "gas", label: "Gas", color: "#C7A233", icon: "flame", warning: true,
+            normativa: "La instalación, prueba y habilitación de gas es responsabilidad exclusiva de un gasista matriculado ante ENARGAS. Este presupuesto no reemplaza el proyecto ni la habilitación correspondiente." },
+        { id: "reparacion", label: "Reparación / Mantenimiento", color: "#6B6B6B", icon: "wrench",
+            normativa: "En intervenciones sobre instalaciones existentes, verificá que la reparación mantenga las condiciones habilitadas por APSJ." }
+    ];
+
+    const STARTER_PRICES = [
+        { id: "p1", categoria: "agua_fria", nombre: 'Caño PPR/PVC 1/2" (barra 4m)', unidad: "u", precio: 0 },
+        { id: "p2", categoria: "agua_fria", nombre: 'Caño PPR/PVC 3/4" (barra 4m)', unidad: "u", precio: 0 },
+        { id: "p3", categoria: "agua_fria", nombre: 'Codo 90° 1/2"', unidad: "u", precio: 0 },
+        { id: "p4", categoria: "agua_fria", nombre: 'Te 1/2"', unidad: "u", precio: 0 },
+        { id: "p5", categoria: "agua_fria", nombre: 'Llave de paso 1/2"', unidad: "u", precio: 0 },
+        { id: "p6", categoria: "agua_fria", nombre: "Tanque de reserva 500L", unidad: "u", precio: 0 },
+        { id: "p7", categoria: "agua_fria", nombre: "Llave maestra / conexión de medidor", unidad: "u", precio: 0 },
+        { id: "p8", categoria: "agua_caliente", nombre: 'Caño PPR termofusión 1/2" (barra 4m)', unidad: "u", precio: 0 },
+        { id: "p9", categoria: "agua_caliente", nombre: "Termotanque a gas 60-80L", unidad: "u", precio: 0 },
+        { id: "p10", categoria: "agua_caliente", nombre: "Termotanque eléctrico", unidad: "u", precio: 0 },
+        { id: "p11", categoria: "agua_caliente", nombre: "Válvula de seguridad", unidad: "u", precio: 0 },
+        { id: "p12", categoria: "agua_caliente", nombre: "Aislación térmica para caño", unidad: "m", precio: 0 },
+        { id: "p13", categoria: "cloacal", nombre: "Caño PVC cloacal 110mm (barra 3m)", unidad: "u", precio: 0 },
+        { id: "p14", categoria: "cloacal", nombre: "Caño PVC cloacal 63mm (barra 3m)", unidad: "u", precio: 0 },
+        { id: "p15", categoria: "cloacal", nombre: "Codo 45° 110mm", unidad: "u", precio: 0 },
+        { id: "p16", categoria: "cloacal", nombre: "Ramal simple 110mm", unidad: "u", precio: 0 },
+        { id: "p17", categoria: "cloacal", nombre: "Cámara de inspección", unidad: "u", precio: 0 },
+        { id: "p18", categoria: "cloacal", nombre: "Rejilla de piso", unidad: "u", precio: 0 },
+        { id: "p19", categoria: "cloacal", nombre: "Sifón", unidad: "u", precio: 0 },
+        { id: "p20", categoria: "pluvial", nombre: "Caño PVC pluvial 110mm (barra 3m)", unidad: "u", precio: 0 },
+        { id: "p21", categoria: "pluvial", nombre: "Embudo pluvial", unidad: "u", precio: 0 },
+        { id: "p22", categoria: "pluvial", nombre: "Canaleta", unidad: "m", precio: 0 },
+        { id: "p23", categoria: "gas", nombre: 'Caño para gas 1/2" (galvanizado/cobre)', unidad: "m", precio: 0 },
+        { id: "p24", categoria: "gas", nombre: "Llave de paso para gas", unidad: "u", precio: 0 },
+        { id: "p25", categoria: "gas", nombre: "Regulador de gas", unidad: "u", precio: 0 },
+        { id: "p26", categoria: "reparacion", nombre: "Visita / diagnóstico", unidad: "u", precio: 0 },
+        { id: "p27", categoria: "reparacion", nombre: "Destape de cañería", unidad: "u", precio: 0 },
+        { id: "p28", categoria: "reparacion", nombre: "Cambio de cuerpo de válvula/canilla", unidad: "u", precio: 0 },
+        { id: "p29", categoria: "reparacion", nombre: "Reparación de pérdida", unidad: "u", precio: 0 },
+        { id: "p30", categoria: "reparacion", nombre: "Cambio de flexible", unidad: "u", precio: 0 }
+    ];
+
+    function uid() {
+        return `id-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    }
+
+    function money(n) {
+        const v = Number(n) || 0;
+        return v.toLocaleString("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 });
+    }
+
+    function blankQuote() {
+        return {
+            id: null,
+            cliente: { nombre: "", direccion: "", telefono: "" },
+            items: [],
+            manoObra: [],
+            traslado: 0,
+            vigenciaDias: 15,
+            heladas: false,
+            notas: "",
+            fecha: new Date().toISOString()
+        };
+    }
+
+    function calcTotals(q) {
+        const materiales = q.items.reduce((s, i) => s + (Number(i.cantidad) || 0) * (Number(i.precio) || 0), 0);
+        const manoObra = q.manoObra.reduce((s, m) => s + (Number(m.monto) || 0), 0);
+        const traslado = Number(q.traslado) || 0;
+        return { materiales, manoObra, traslado, total: materiales + manoObra + traslado };
+    }
+
+    // ====== COMPONENTE DimDivider ======
+    function DimDivider({ label }) {
+        return React.createElement('div', { className: 'dim-divider' },
+            React.createElement('span', { className: 'dim-tick' }),
+            React.createElement('span', { className: 'dim-label' }, label),
+            React.createElement('span', { className: 'dim-line' })
+        );
+    }
+
+    // ====== ICONOS SVG ======
+    const Icons = {
+        Droplet: () => React.createElement('svg', { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" },
+            React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M12 2C10 6 6 10 6 14a6 6 0 1012 0c0-4-4-8-6-12z" })),
+        Flame: () => React.createElement('svg', { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" },
+            React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c0-2 .5-5 2.5-7S13 5 14 6c1-3 3-5 3-5s2 4 2 9a7 7 0 01-1.343 3.657z" })),
+        Wrench: () => React.createElement('svg', { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" },
+            React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" })),
+        Plus: () => React.createElement('svg', { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" },
+            React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M12 4v16m8-8H4" })),
+        Trash2: () => React.createElement('svg', { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" },
+            React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" })),
+        Printer: () => React.createElement('svg', { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" },
+            React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" })),
+        Save: () => React.createElement('svg', { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" },
+            React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" })),
+        AlertTriangle: () => React.createElement('svg', { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" },
+            React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" })),
+        Snowflake: () => React.createElement('svg', { className: "w-4 h-4", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" },
+            React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M12 4v16m4-12l-4 4m0 0l-4-4m4 4V4" })),
+        Loader2: () => React.createElement('svg', { className: "w-4 h-4 animate-spin", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" },
+            React.createElement('path', { strokeLinecap: "round", strokeLinejoin: "round", strokeWidth: "2", d: "M12 4v4m0 4v4m4-12l-4 4m0 0l-4-4m4 4V4" }))
+    };
+
+    // ====== COMPONENTE PRINCIPAL ======
+    function App() {
+        const [loading, setLoading] = React.useState(true);
+        const [tab, setTab] = React.useState("nuevo");
+        const [status, setStatus] = React.useState(null);
+        const [perfil, setPerfil] = React.useState({ nombre: "", matricula: "", localidad: "Abra Pampa, Jujuy" });
+        const [precios, setPrecios] = React.useState(STARTER_PRICES);
+        const [preciosDirty, setPreciosDirty] = React.useState(false);
+        const [quotesIndex, setQuotesIndex] = React.useState([]);
+        const [quote, setQuote] = React.useState(blankQuote());
+        const [activeCategory, setActiveCategory] = React.useState(null);
+
+        React.useEffect(() => {
+            let alive = true;
+            (async () => {
+                try {
+                    const p = storage.get(PERFIL_KEY);
+                    if (alive && p) setPerfil(p);
+                } catch (e) {}
+                try {
+                    const pr = storage.get(PRECIOS_KEY);
+                    if (alive && pr) setPrecios(pr);
+                    else storage.set(PRECIOS_KEY, STARTER_PRICES);
+                } catch (e) {}
+                try {
+                    const idx = storage.get(INDEX_KEY);
+                    if (alive && idx) setQuotesIndex(idx);
+                } catch (e) {}
+                if (alive) setLoading(false);
+            })();
+            return () => { alive = false; };
+        }, []);
+
+        function flash(type, msg) {
+            setStatus({ type, msg });
+            setTimeout(() => setStatus(null), 2500);
+        }
+
+        function savePerfil(next) {
+            setPerfil(next);
+            storage.set(PERFIL_KEY, next);
+        }
+
+        function guardarPrecios() {
+            storage.set(PRECIOS_KEY, precios);
+            setPreciosDirty(false);
+            flash("ok", "Lista de precios guardada.");
+        }
+
+        function guardarPresupuesto() {
+            const id = quote.id || uid();
+            const toSave = { ...quote, id, fecha: quote.fecha || new Date().toISOString() };
+            storage.set(`presupuesto-${id}`, toSave);
+            const t = calcTotals(toSave);
+            const meta = { id, cliente: toSave.cliente.nombre || "Sin nombre", fecha: toSave.fecha, total: t.total };
+            const nextIndex = [meta, ...quotesIndex.filter(q => q.id !== id)];
+            storage.set(INDEX_KEY, nextIndex);
+            setQuotesIndex(nextIndex);
+            setQuote(toSave);
+            flash("ok", "Presupuesto guardado.");
+        }
+
+        function abrirPresupuesto(id) {
+            try {
+                const q = storage.get(`presupuesto-${id}`);
+                if (q) {
+                    setQuote(q);
+                    setActiveCategory(null);
+                    setTab("nuevo");
+                }
+            } catch (e) {
+                flash("error", "No se pudo abrir el presupuesto.");
+            }
+        }
+
+        function eliminarPresupuesto(id) {
+            storage.delete(`presupuesto-${id}`);
+            const nextIndex = quotesIndex.filter(q => q.id !== id);
+            storage.set(INDEX_KEY, nextIndex);
+            setQuotesIndex(nextIndex);
+            if (quote.id === id) setQuote(blankQuote());
+            flash("ok", "Presupuesto eliminado.");
+        }
+
+        function nuevoPresupuesto() {
+            setQuote(blankQuote());
+            setActiveCategory(null);
+            setTab("nuevo");
+        }
+
+        function addItem(catItem) {
+            setQuote(q => ({
+                ...q,
+                items: [...q.items, { id: uid(), categoria: catItem.categoria, nombre: catItem.nombre, unidad: catItem.unidad, cantidad: 1, precio: catItem.precio }]
+            }));
+        }
+
+        function addCustomItem(categoria) {
+            setQuote(q => ({
+                ...q,
+                items: [...q.items, { id: uid(), categoria, nombre: "", unidad: "u", cantidad: 1, precio: 0 }]
+            }));
+        }
+
+        function updateItem(id, patch) {
+            setQuote(q => ({ ...q, items: q.items.map(i => i.id === id ? { ...i, ...patch } : i) }));
+        }
+
+        function removeItem(id) {
+            setQuote(q => ({ ...q, items: q.items.filter(i => i.id !== id) }));
+        }
+
+        function addManoObra() {
+            setQuote(q => ({ ...q, manoObra: [...q.manoObra, { id: uid(), descripcion: "", monto: 0 }] }));
+        }
+
+        function updateManoObra(id, patch) {
+            setQuote(q => ({ ...q, manoObra: q.manoObra.map(m => m.id === id ? { ...m, ...patch } : m) }));
+        }
+
+        function removeManoObra(id) {
+            setQuote(q => ({ ...q, manoObra: q.manoObra.filter(m => m.id !== id) }));
+        }
+
+        function updatePrecio(id, patch) {
+            setPrecios(p => p.map(x => x.id === id ? { ...x, ...patch } : x));
+            setPreciosDirty(true);
+        }
+
+        function addPrecioRow(categoria) {
+            setPrecios(p => [...p, { id: uid(), categoria, nombre: "", unidad: "u", precio: 0 }]);
+            setPreciosDirty(true);
+        }
+
+        function removePrecioRow(id) {
+            setPrecios(p => p.filter(x => x.id !== id));
+            setPreciosDirty(true);
+        }
+
+        const totals = calcTotals(quote);
+        const tieneGas = quote.items.some(i => i.categoria === "gas");
+
+        function getIconForCategory(catId) {
+            const cat = CATEGORIES.find(c => c.id === catId);
+            if (!cat) return Icons.Wrench;
+            switch (cat.icon) {
+                case 'droplet': return Icons.Droplet;
+                case 'flame': return Icons.Flame;
+                default: return Icons.Wrench;
+            }
+        }
+
+        // Renderizar el componente principal
+        return React.createElement('div', { className: "min-h-screen paper-bg ff-body" },
+            // Header
+            React.createElement('header', { className: "rotulo" },
+                React.createElement('div', { className: "max-w-5xl mx-auto px-4 py-4" },
+                    React.createElement('div', { className: "flex items-center justify-between flex-wrap gap-3" },
+                        React.createElement('div', null,
+                            React.createElement('p', { className: "ff-display uppercase text-2xl tracking-wide" }, "Presupuestos · Plomería"),
+                            React.createElement('p', { className: "ff-mono text-2xs opacity-70" }, "Herramienta de cálculo para instalaciones sanitarias en Jujuy")
+                        ),
+                        React.createElement('div', { className: "grid grid-cols-2 sm:grid-cols-3 gap-0 ff-mono text-2xs" },
+                            React.createElement('div', { className: "rotulo-cell px-3 py-2" },
+                                React.createElement('div', { className: "rotulo-label uppercase" }, "Nombre"),
+                                React.createElement('input', {
+                                    value: perfil.nombre,
+                                    onChange: e => setPerfil({ ...perfil, nombre: e.target.value }),
+                                    onBlur: () => savePerfil(perfil),
+                                    placeholder: "Tu nombre",
+                                    className: "bg-transparent outline-none w-full placeholder:opacity-40"
+                                })
+                            ),
+                            React.createElement('div', { className: "rotulo-cell px-3 py-2" },
+                                React.createElement('div', { className: "rotulo-label uppercase" }, "Matrícula"),
+                                React.createElement('input', {
+                                    value: perfil.matricula,
+                                    onChange: e => setPerfil({ ...perfil, matricula: e.target.value }),
+                                    onBlur: () => savePerfil(perfil),
+                                    placeholder: "N° matrícula",
+                                    className: "bg-transparent outline-none w-full placeholder:opacity-40"
+                                })
+                            ),
+                            React.createElement('div', { className: "rotulo-cell px-3 py-2 col-span-2 sm:col-span-1" },
+                                React.createElement('div', { className: "rotulo-label uppercase" }, "Localidad"),
+                                React.createElement('input', {
+                                    value: perfil.localidad,
+                                    onChange: e => setPerfil({ ...perfil, localidad: e.target.value }),
+                                    onBlur: () => savePerfil(perfil),
+                                    className: "bg-transparent outline-none w-full"
+                                })
+                            )
+                        )
+                    ),
+                    React.createElement('nav', { className: "flex gap-6 mt-4 border-t border-white/10 pt-2" },
+                        React.createElement('button', {
+                            'data-active': tab === "nuevo" ? "true" : "false",
+                            className: "tab-btn pb-1 text-sm uppercase",
+                            onClick: () => setTab("nuevo")
+                        }, "Nuevo presupuesto"),
+                        React.createElement('button', {
+                            'data-active': tab === "precios" ? "true" : "false",
+                            className: "tab-btn pb-1 text-sm uppercase",
+                            onClick: () => setTab("precios")
+                        }, "Lista de precios"),
+                        React.createElement('button', {
+                            'data-active': tab === "guardados" ? "true" : "false",
+                            className: "tab-btn pb-1 text-sm uppercase",
+                            onClick: () => setTab("guardados")
+                        }, "Guardados (", quotesIndex.length, ")")
+                    )
+                )
+            ),
+
+            // Main
+            React.createElement('main', { className: "max-w-5xl mx-auto px-4 py-6" },
+                loading ?
+                    React.createElement('div', { className: "flex items-center gap-2 text-gray-400 text-sm py-16 justify-center" },
+                        React.createElement(Icons.Loader2, null), " Cargando..."
+                    ) :
+                    React.createElement(React.Fragment, null,
+                        tab === "nuevo" && React.createElement('section', null,
+                            // Cliente
+                            React.createElement('section', { className: "bg-white rounded-md border border-gray-200 p-4" },
+                                React.createElement(DimDivider, { label: "Cliente" }),
+                                React.createElement('div', { className: "grid sm:grid-cols-3 gap-3" },
+                                    React.createElement('label', { className: "text-sm" },
+                                        React.createElement('span', { className: "block text-xs uppercase tracking-wide text-gray-500 mb-1 ff-mono" }, "Nombre"),
+                                        React.createElement('input', {
+                                            value: quote.cliente.nombre,
+                                            onChange: e => setQuote(q => ({ ...q, cliente: { ...q.cliente, nombre: e.target.value } })),
+                                            className: "w-full border border-gray-300 rounded px-2 py-1.5 ff-body"
+                                        })
+                                    ),
+                                    React.createElement('label', { className: "text-sm" },
+                                        React.createElement('span', { className: "block text-xs uppercase tracking-wide text-gray-500 mb-1 ff-mono" }, "Dirección"),
+                                        React.createElement('input', {
+                                            value: quote.cliente.direccion,
+                                            onChange: e => setQuote(q => ({ ...q, cliente: { ...q.cliente, direccion: e.target.value } })),
+                                            className: "w-full border border-gray-300 rounded px-2 py-1.5 ff-body"
+                                        })
+                                    ),
+                                    React.createElement('label', { className: "text-sm" },
+                                        React.createElement('span', { className: "block text-xs uppercase tracking-wide text-gray-500 mb-1 ff-mono" }, "Teléfono"),
+                                        React.createElement('input', {
+                                            value: quote.cliente.telefono,
+                                            onChange: e => setQuote(q => ({ ...q, cliente: { ...q.cliente, telefono: e.target.value } })),
+                                            className: "w-full border border-gray-300 rounded px-2 py-1.5 ff-body"
+                                        })
+                                    )
+                                )
+                            ),
+
+                            // Categorías
+                            React.createElement(DimDivider, { label: "Agregar ítems" }),
+                            React.createElement('div', { className: "flex flex-wrap gap-2 mb-3" },
+                                CATEGORIES.map(cat => {
+                                    const active = activeCategory === cat.id;
+                                    const IconComp = getIconForCategory(cat.id);
+                                    return React.createElement('button', {
+                                        key: cat.id,
+                                        onClick: () => setActiveCategory(active ? null : cat.id),
+                                        style: { borderColor: cat.color, background: active ? cat.color : "#fff", color: active ? "#fff" : "#374151" },
+                                        className: "flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-sm ff-body"
+                                    }, React.createElement(IconComp, null), cat.label);
+                                })
+                            ),
+
+                            // Items de categoría activa
+                            activeCategory && (() => {
+                                const cat = CATEGORIES.find(c => c.id === activeCategory);
+                                const items = precios.filter(p => p.categoria === activeCategory);
+                                return React.createElement('div', {
+                                    className: "border rounded-md p-4 mb-4 bg-white",
+                                    style: { borderColor: cat.color }
+                                },
+                                    React.createElement('div', {
+                                        className: `flex gap-2 text-sm p-3 rounded mb-3 ${cat.warning ? "bg-amber-50 text-amber-900" : "bg-gray-50 text-gray-700"}`
+                                    },
+                                        cat.warning && React.createElement(Icons.AlertTriangle, null),
+                                        React.createElement('p', { className: "ff-body" }, cat.normativa)
+                                    ),
+                                    React.createElement('div', { className: "grid sm:grid-cols-2 gap-2" },
+                                        items.map(it =>
+                                            React.createElement('button', {
+                                                key: it.id,
+                                                onClick: () => addItem(it),
+                                                className: "flex items-center justify-between gap-2 border border-gray-200 rounded px-3 py-2 text-left hover:border-gray-400 transition"
+                                            },
+                                                React.createElement('span', { className: "text-sm ff-body" },
+                                                    it.nombre || React.createElement('span', { className: "text-gray-400 italic" }, "(sin nombre)"),
+                                                    " ",
+                                                    React.createElement('span', { className: "text-gray-400 ff-mono text-xs" }, "/", it.unidad)
+                                                ),
+                                                React.createElement(Icons.Plus, null)
+                                            )
+                                        ),
+                                        React.createElement('button', {
+                                            onClick: () => addCustomItem(activeCategory),
+                                            className: "flex items-center justify-center gap-2 border border-dashed border-gray-300 rounded px-3 py-2 text-sm text-gray-500 hover:border-gray-400"
+                                        },
+                                            React.createElement(Icons.Plus, null), " Ítem personalizado"
+                                        )
+                                    )
+                                );
+                            })(),
+
+                            // Tabla de items del presupuesto
+                            quote.items.length > 0 && React.createElement('div', { className: "overflow-x-auto mb-4" },
+                                React.createElement('table', { className: "w-full text-sm border-collapse" },
+                                    React.createElement('thead', null,
+                                        React.createElement('tr', { className: "text-left text-xs uppercase text-gray-500 ff-mono border-b border-gray-200" },
+                                            React.createElement('th', { className: "py-2 pr-2" }),
+                                            React.createElement('th', { className: "py-2 pr-2" }, "Ítem"),
+                                            React.createElement('th', { className: "py-2 pr-2 w-20" }, "Cant."),
+                                            React.createElement('th', { className: "py-2 pr-2 w-16" }, "Unid."),
+                                            React.createElement('th', { className: "py-2 pr-2 w-28" }, "P. unitario"),
+                                            React.createElement('th', { className: "py-2 pr-2 w-28 text-right" }, "Subtotal"),
+                                            React.createElement('th', { className: "py-2" })
+                                        )
+                                    ),
+                                    React.createElement('tbody', null,
+                                        quote.items.map(it => {
+                                            const cat = CATEGORIES.find(c => c.id === it.categoria);
+                                            return React.createElement('tr', { key: it.id, className: "border-b border-gray-100" },
+                                                React.createElement('td', { className: "py-1.5 pr-2" },
+                                                    React.createElement('span', { className: "inline-block w-2.5 h-2.5 rounded-full", style: { background: cat ? cat.color : "#999" } })
+                                                ),
+                                                React.createElement('td', { className: "py-1.5 pr-2" },
+                                                    React.createElement('input', {
+                                                        value: it.nombre,
+                                                        onChange: e => updateItem(it.id, { nombre: e.target.value }),
+                                                        className: "w-full ff-body bg-transparent outline-none"
+                                                    })
+                                                ),
+                                                React.createElement('td', { className: "py-1.5 pr-2" },
+                                                    React.createElement('input', {
+                                                        type: "number",
+                                                        step: "any",
+                                                        value: it.cantidad,
+                                                        onChange: e => updateItem(it.id, { cantidad: e.target.value }),
+                                                        className: "w-16 ff-mono bg-transparent outline-none border-b border-transparent focus:border-gray-300"
+                                                    })
+                                                ),
+                                                React.createElement('td', { className: "py-1.5 pr-2" },
+                                                    React.createElement('input', {
+                                                        value: it.unidad,
+                                                        onChange: e => updateItem(it.id, { unidad: e.target.value }),
+                                                        className: "w-14 ff-mono bg-transparent outline-none"
+                                                    })
+                                                ),
+                                                React.createElement('td', { className: "py-1.5 pr-2" },
+                                                    React.createElement('input', {
+                                                        type: "number",
+                                                        step: "any",
+                                                        value: it.precio,
+                                                        onChange: e => updateItem(it.id, { precio: e.target.value }),
+                                                        className: "w-24 ff-mono bg-transparent outline-none border-b border-transparent focus:border-gray-300"
+                                                    })
+                                                ),
+                                                React.createElement('td', { className: "py-1.5 pr-2 text-right ff-mono" },
+                                                    money((Number(it.cantidad) || 0) * (Number(it.precio) || 0))
+                                                ),
+                                                React.createElement('td', { className: "py-1.5" },
+                                                    React.createElement('button', {
+                                                        onClick: () => removeItem(it.id),
+                                                        className: "text-gray-300 hover:text-red-500"
+                                                    }, React.createElement(Icons.Trash2, null))
+                                                )
+                                            );
+                                        })
+                                    )
+                                )
+                            ),
+
+                            // Mano de obra
+                            React.createElement(DimDivider, { label: "Mano de obra" }),
+                            React.createElement('div', { className: "mb-2" },
+                                quote.manoObra.map(m =>
+                                    React.createElement('div', { key: m.id, className: "flex items-center gap-2 mb-2" },
+                                        React.createElement('input', {
+                                            value: m.descripcion,
+                                            onChange: e => updateManoObra(m.id, { descripcion: e.target.value }),
+                                            placeholder: "Descripción",
+                                            className: "flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm ff-body"
+                                        }),
+                                        React.createElement('input', {
+                                            type: "number",
+                                            step: "any",
+                                            value: m.monto,
+                                            onChange: e => updateManoObra(m.id, { monto: e.target.value }),
+                                            className: "w-28 border border-gray-300 rounded px-2 py-1.5 text-sm ff-mono"
+                                        }),
+                                        React.createElement('button', {
+                                            onClick: () => removeManoObra(m.id),
+                                            className: "text-gray-300 hover:text-red-500"
+                                        }, React.createElement(Icons.Trash2, null))
+                                    )
+                                ),
+                                React.createElement('button', {
+                                    onClick: addManoObra,
+                                    className: "text-xs text-gray-500 hover:text-gray-800 flex items-center gap-1"
+                                }, React.createElement(Icons.Plus, null), " agregar ítem de mano de obra")
+                            ),
+
+                            // Configuraciones adicionales
+                            React.createElement('section', { className: "bg-white rounded-md border border-gray-200 p-4 mt-4 grid sm:grid-cols-2 gap-4" },
+                                React.createElement('label', { className: "text-sm" },
+                                    React.createElement('span', { className: "block text-xs uppercase tracking-wide text-gray-500 mb-1 ff-mono" }, "Traslado / otros gastos"),
+                                    React.createElement('input', {
+                                        type: "number",
+                                        step: "any",
+                                        value: quote.traslado,
+                                        onChange: e => setQuote(q => ({ ...q, traslado: e.target.value })),
+                                        className: "w-full border border-gray-300 rounded px-2 py-1.5 ff-mono"
+                                    })
+                                ),
+                                React.createElement('label', { className: "text-sm" },
+                                    React.createElement('span', { className: "block text-xs uppercase tracking-wide text-gray-500 mb-1 ff-mono" }, "Válido por (días)"),
+                                    React.createElement('input', {
+                                        type: "number",
+                                        value: quote.vigenciaDias,
+                                        onChange: e => setQuote(q => ({ ...q, vigenciaDias: e.target.value })),
+                                        className: "w-full border border-gray-300 rounded px-2 py-1.5 ff-mono"
+                                    })
+                                ),
+                                React.createElement('label', { className: "flex items-center gap-2 text-sm sm:col-span-2" },
+                                    React.createElement('input', {
+                                        type: "checkbox",
+                                        checked: quote.heladas,
+                                        onChange: e => setQuote(q => ({ ...q, heladas: e.target.checked }))
+                                    }),
+                                    React.createElement(Icons.Snowflake, null),
+                                    " Instalación en zona de heladas (Puna) — incluir recomendación de protección anticongelante"
+                                ),
+                                React.createElement('label', { className: "text-sm sm:col-span-2" },
+                                    React.createElement('span', { className: "block text-xs uppercase tracking-wide text-gray-500 mb-1 ff-mono" }, "Notas"),
+                                    React.createElement('textarea', {
+                                        value: quote.notas,
+                                        onChange: e => setQuote(q => ({ ...q, notas: e.target.value })),
+                                        rows: 2,
+                                        className: "w-full border border-gray-300 rounded px-2 py-1.5 ff-body"
+                                    })
+                                )
+                            ),
+
+                            // Botones de acción
+                            React.createElement('div', { className: "flex flex-wrap gap-2 my-4 no-print" },
+                                React.createElement('button', {
+                                    onClick: guardarPresupuesto,
+                                    className: "inline-flex items-center gap-2 px-4 py-2 rounded ff-body text-sm text-white",
+                                    style: { background: "#B5652D" }
+                                }, React.createElement(Icons.Save, null), " Guardar presupuesto"),
+                                React.createElement('button', {
+                                    onClick: () => window.print(),
+                                    className: "inline-flex items-center gap-2 px-4 py-2 rounded ff-body text-sm border border-gray-300 hover:bg-gray-50"
+                                }, React.createElement(Icons.Printer, null), " Imprimir / PDF"),
+                                React.createElement('button', {
+                                    onClick: nuevoPresupuesto,
+                                    className: "inline-flex items-center gap-2 px-4 py-2 rounded ff-body text-sm text-gray-500 hover:text-gray-800"
+                                }, "Nuevo presupuesto")
+                            ),
+
+                            // Vista previa
+                            React.createElement('div', { id: "quote-preview", className: "bg-white border border-gray-200 rounded-md p-6 mt-4" },
+                                React.createElement('div', { className: "flex justify-between items-start border-b border-gray-800 pb-3 mb-3 flex-wrap gap-2" },
+                                    React.createElement('div', null,
+                                        React.createElement('p', { className: "ff-display uppercase text-xl" }, "Presupuesto"),
+                                        React.createElement('p', { className: "ff-mono text-xs text-gray-500" },
+                                            perfil.nombre || "Plomero",
+                                            perfil.matricula && ` · Matrícula ${perfil.matricula}`
+                                        ),
+                                        React.createElement('p', { className: "ff-mono text-xs text-gray-500" }, perfil.localidad)
+                                    ),
+                                    React.createElement('div', { className: "text-right ff-mono text-xs text-gray-500" },
+                                        React.createElement('p', null, "Fecha: ", new Date(quote.fecha).toLocaleDateString("es-AR")),
+                                        React.createElement('p', null, "Válido por ", quote.vigenciaDias || 15, " días")
+                                    )
+                                ),
+                                React.createElement('div', { className: "mb-3 ff-body text-sm" },
+                                    React.createElement('p', null,
+                                        React.createElement('span', { className: "text-gray-500" }, "Cliente:"), " ", quote.cliente.nombre || "—"
+                                    ),
+                                    quote.cliente.direccion && React.createElement('p', null,
+                                        React.createElement('span', { className: "text-gray-500" }, "Dirección:"), " ", quote.cliente.direccion
+                                    ),
+                                    quote.cliente.telefono && React.createElement('p', null,
+                                        React.createElement('span', { className: "text-gray-500" }, "Teléfono:"), " ", quote.cliente.telefono
+                                    )
+                                ),
+                                quote.items.length > 0 && React.createElement('table', { className: "w-full text-sm mb-3" },
+                                    React.createElement('thead', null,
+                                        React.createElement('tr', { className: "text-left text-xs uppercase text-gray-500 border-b" },
+                                            React.createElement('th', { className: "py-1" }, "Ítem"),
+                                            React.createElement('th', { className: "py-1 text-right" }, "Cant."),
+                                            React.createElement('th', { className: "py-1 text-right" }, "P. unit."),
+                                            React.createElement('th', { className: "py-1 text-right" }, "Subtotal")
+                                        )
+                                    ),
+                                    React.createElement('tbody', null,
+                                        quote.items.map(it =>
+                                            React.createElement('tr', { key: it.id, className: "border-b border-gray-100" },
+                                                React.createElement('td', { className: "py-1" }, it.nombre),
+                                                React.createElement('td', { className: "py-1 text-right ff-mono" }, it.cantidad, " ", it.unidad),
+                                                React.createElement('td', { className: "py-1 text-right ff-mono" }, money(it.precio)),
+                                                React.createElement('td', { className: "py-1 text-right ff-mono" },
+                                                    money((Number(it.cantidad) || 0) * (Number(it.precio) || 0))
+                                                )
+                                            )
+                                        )
+                                    )
+                                ),
+                                quote.manoObra.length > 0 && React.createElement('table', { className: "w-full text-sm mb-3" },
+                                    React.createElement('thead', null,
+                                        React.createElement('tr', { className: "text-left text-xs uppercase text-gray-500 border-b" },
+                                            React.createElement('th', { className: "py-1" }, "Mano de obra"),
+                                            React.createElement('th', { className: "py-1 text-right" }, "Monto")
+                                        )
+                                    ),
+                                    React.createElement('tbody', null,
+                                        quote.manoObra.map(m =>
+                                            React.createElement('tr', { key: m.id, className: "border-b border-gray-100" },
+                                                React.createElement('td', { className: "py-1" }, m.descripcion),
+                                                React.createElement('td', { className: "py-1 text-right ff-mono" }, money(m.monto))
+                                            )
+                                        )
+                                    )
+                                ),
+                                quote.heladas && React.createElement('p', { className: "text-xs text-blue-800 bg-blue-50 rounded p-2 mb-3 flex gap-2 items-start" },
+                                    React.createElement(Icons.Snowflake, null),
+                                    " Instalación en zona de heladas (Puna): se recomienda protección anticongelante y mayor profundidad de tapada en tramos expuestos."
+                                ),
+                                quote.notas && React.createElement('p', { className: "text-sm mb-3 whitespace-pre-wrap" },
+                                    React.createElement('span', { className: "text-gray-500" }, "Notas:"), " ", quote.notas
+                                ),
+                                React.createElement('div', { className: "border-t border-gray-800 pt-3 flex justify-end" },
+                                    React.createElement('div', { className: "text-right ff-mono text-sm space-y-0.5" },
+                                        React.createElement('p', null, "Materiales: ", money(totals.materiales)),
+                                        React.createElement('p', null, "Mano de obra: ", money(totals.manoObra)),
+                                        totals.traslado > 0 && React.createElement('p', null, "Traslado/otros: ", money(totals.traslado)),
+                                        React.createElement('p', { className: "text-lg font-semibold pt-1" }, "TOTAL: ", money(totals.total))
+                                    )
+                                ),
+                                React.createElement('p', { className: "text-2xs text-gray-400 ff-body mt-4 leading-snug" },
+                                    "Presupuesto sujeto a variación de precios. El marco normativo vigente debe confirmarse con Agua Potable y Saneamiento de Jujuy S.E. (APSJ)",
+                                    tieneGas ? " y con un gasista matriculado ante ENARGAS " : " ",
+                                    "antes de habilitar la instalación."
+                                ),
+                                React.createElement('div', { className: "flex justify-between mt-8 text-xs ff-mono text-gray-400" },
+                                    React.createElement('div', { className: "border-t border-gray-300 pt-1 w-40 text-center" }, "Firma"),
+                                    React.createElement('div', { className: "border-t border-gray-300 pt-1 w-40 text-center" }, "Aclaración")
+                                )
+                            )
+                        ),
+
+                        tab === "precios" && React.createElement('section', null,
+                            React.createElement(DimDivider, { label: "Lista de precios" }),
+                            React.createElement('p', { className: "text-sm text-gray-500 ff-body mb-4" },
+                                "Cargá tus precios actuales de materiales. No vienen precargados: la app no puede saber los precios de hoy en tu zona."
+                            ),
+                            CATEGORIES.map(cat =>
+                                React.createElement('div', { key: cat.id, className: "mb-6" },
+                                    React.createElement('div', { className: "flex items-center gap-2 mb-2" },
+                                        React.createElement('span', { className: "w-2.5 h-2.5 rounded-full", style: { background: cat.color } }),
+                                        React.createElement('p', { className: "ff-display uppercase text-sm tracking-wide" }, cat.label)
+                                    ),
+                                    React.createElement('div', { className: "overflow-x-auto" },
+                                        React.createElement('table', { className: "w-full text-sm mb-2" },
+                                            React.createElement('thead', null,
+                                                React.createElement('tr', { className: "text-left text-xs uppercase text-gray-400 ff-mono border-b" },
+                                                    React.createElement('th', { className: "py-1" }, "Nombre"),
+                                                    React.createElement('th', { className: "py-1 w-20" }, "Unidad"),
+                                                    React.createElement('th', { className: "py-1 w-32" }, "Precio"),
+                                                    React.createElement('th', null)
+                                                )
+                                            ),
+                                            React.createElement('tbody', null,
+                                                precios.filter(p => p.categoria === cat.id).map(p =>
+                                                    React.createElement('tr', { key: p.id, className: "border-b border-gray-100" },
+                                                        React.createElement('td', { className: "py-1" },
+                                                            React.createElement('input', {
+                                                                value: p.nombre,
+                                                                onChange: e => updatePrecio(p.id, { nombre: e.target.value }),
+                                                                className: "w-full bg-transparent outline-none ff-body"
+                                                            })
+                                                        ),
+                                                        React.createElement('td', { className: "py-1" },
+                                                            React.createElement('input', {
+                                                                value: p.unidad,
+                                                                onChange: e => updatePrecio(p.id, { unidad: e.target.value }),
+                                                                className: "w-16 bg-transparent outline-none ff-mono"
+                                                            })
+                                                        ),
+                                                        React.createElement('td', { className: "py-1" },
+                                                            React.createElement('input', {
+                                                                type: "number",
+                                                                step: "any",
+                                                                value: p.precio,
+                                                                onChange: e => updatePrecio(p.id, { precio: e.target.value }),
+                                                                className: "w-28 bg-transparent outline-none ff-mono"
+                                                            })
+                                                        ),
+                                                        React.createElement('td', { className: "py-1" },
+                                                            React.createElement('button', {
+                                                                onClick: () => removePrecioRow(p.id),
+                                                                className: "text-gray-300 hover:text-red-500"
+                                                            }, React.createElement(Icons.Trash2, null))
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    ),
+                                    React.createElement('button', {
+                                        onClick: () => addPrecioRow(cat.id),
+                                        className: "text-xs text-gray-500 hover:text-gray-800 flex items-center gap-1"
+                                    }, React.createElement(Icons.Plus, null), " agregar ítem")
+                                )
+                            ),
+                            React.createElement('button', {
+                                onClick: guardarPrecios,
+                                disabled: !preciosDirty,
+                                className: "mt-2 inline-flex items-center gap-2 px-4 py-2 rounded ff-body text-sm text-white disabled:opacity-40",
+                                style: { background: "#B5652D" }
+                            }, React.createElement(Icons.Save, null), " Guardar cambios ", preciosDirty && "•")
+                        ),
+
+                        tab === "guardados" && React.createElement('section', null,
+                            React.createElement(DimDivider, { label: "Presupuestos guardados" }),
+                            quotesIndex.length === 0 ?
+                                React.createElement('p', { className: "text-sm text-gray-400 ff-body" }, "Todavía no guardaste ningún presupuesto.") :
+                                React.createElement('div', { className: "space-y-2" },
+                                    quotesIndex.map(q =>
+                                        React.createElement('div', { key: q.id, className: "flex items-center justify-between border border-gray-200 rounded px-3 py-2 bg-white flex-wrap gap-2" },
+                                            React.createElement('div', null,
+                                                React.createElement('p', { className: "ff-body text-sm" }, q.cliente),
+                                                React.createElement('p', { className: "ff-mono text-xs text-gray-400" },
+                                                    new Date(q.fecha).toLocaleDateString("es-AR"), " · ", money(q.total)
+                                                )
+                                            ),
+                                            React.createElement('div', { className: "flex gap-2" },
+                                                React.createElement('button', {
+                                                    onClick: () => abrirPresupuesto(q.id),
+                                                    className: "text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                                                }, "Abrir"),
+                                                React.createElement('button', {
+                                                    onClick: () => eliminarPresupuesto(q.id),
+                                                    className: "text-xs px-2 py-1 border rounded text-red-500 hover:bg-red-50"
+                                                }, "Eliminar")
+                                            )
+                                        )
+                                    )
+                                )
+                        )
+                    )
+            ),
+
+            // Footer
+            React.createElement('footer', { className: "max-w-5xl mx-auto px-4 pb-10 pt-2 text-xs text-gray-400 ff-body leading-relaxed" },
+                "Herramienta de cálculo de uso profesional. En Jujuy, el reglamento de instalaciones internas lo fija Agua Potable y Saneamiento de Jujuy S.E. (APSJ), en el marco del Código de Aguas provincial (Ley 161). Las instalaciones de gas requieren gasista matriculado ante ENARGAS. Confirmá siempre los requisitos vigentes de habilitación con APSJ y tu colegio o consejo profesional antes de ejecutar una obra."
+            ),
+
+            // Status notification
+            status && React.createElement('div', {
+                className: `fixed bottom-4 right-4 px-4 py-2 rounded text-sm text-white shadow-lg ${status.type === "ok" ? "bg-emerald-600" : "bg-red-600"}`
+            }, status.msg)
+        );
+    }
+
+    // ====== RENDERIZADO ======
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(App));
+</script>
+
+</body>
+</html>
